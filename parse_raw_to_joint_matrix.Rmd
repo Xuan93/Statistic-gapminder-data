@@ -1,0 +1,108 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+# Load libraries and data
+
+## Libraries
+
+```{r}
+library(tidyverse)
+```
+
+## Data
+
+```{r}
+matrices_list <- list()
+matrices_list$sanitation <- read_csv("raw_data/at_least_basic_sanitation_overall_access_percent.csv")
+matrices_list$child_mortality <- read_csv("raw_data/child_mortality_0_5_year_olds_dying_per_1000_born.csv")
+matrices_list$children_per_woman <- read_csv("raw_data/children_per_woman_total_fertility.csv")
+# matrices_list$co2_emission <- read_csv("raw_data/co2_emissions_tonnes_per_person.csv")
+matrices_list$gini <- read_csv("raw_data/gini.csv")
+matrices_list$income_per_person <- read_csv("raw_data/income_per_person_gdppercapita_ppp_inflation_adjusted.csv")
+matrices_list$life_expectancy <- read_csv("raw_data/life_expectancy_years.csv")
+
+map(matrices_list, dim)
+```
+
+# Parse
+
+```{r}
+joint_countries <- map(matrices_list, ~.$country) %>% Reduce(intersect, .)
+
+# Double check that all have the same number of rows
+map(matrices_list, ~.x %>% filter(country %in% joint_countries)) %>% map(dim)
+
+map(matrices_list, ~(.x %>% filter(country %in% joint_countries) %>% select(tail(names(.), 5))))
+
+map(
+    matrices_list, 
+    ~(.x %>% 
+          filter(country %in% joint_countries) %>% 
+          select(country, "2013":"2017")
+     )
+) %>% map(dim)
+
+year_ranged_data <- map(
+    matrices_list, 
+    ~(.x %>% 
+          filter(country %in% joint_countries) %>% 
+          select(country, "2017")
+     )
+)
+```
+
+```{r}
+year_ranged_data %>% map(colnames)
+
+non_elegant_final_data <- data.frame(
+    country=year_ranged_data$sanitation$country,
+    sanitation=year_ranged_data$sanitation$`2017`,
+    child_mortality=year_ranged_data$child_mortality$`2017`,
+    children_per_woman=year_ranged_data$children_per_woman$`2017`,
+    gini=year_ranged_data$gini$`2017`,
+    income_per_person=year_ranged_data$income_per_person$`2017`,
+    life_expectancy=year_ranged_data$life_expectancy$`2017`
+)
+
+semi_elegant_final <- year_ranged_data %>% 
+    map(~select(.x, "2017")) %>% 
+    do.call("cbind", .) %>% 
+    `colnames<-`(names(year_ranged_data)) %>%
+    mutate(country=year_ranged_data$child_mortality$country) %>%
+    select(country, everything())
+
+most_elegant_final <- year_ranged_data %>% 
+    Reduce(function(m1, m2) { inner_join(m1, m2, by="country") }, .) %>%
+    `colnames<-`(c("country", names(year_ranged_data)))
+
+Reduce(function(c1, c2) { c1 + c2 }, list(2,3,4))
+
+?Reduce
+
+all(non_elegant_final_data == semi_elegant_final, na.rm = TRUE)
+all(non_elegant_final_data == most_elegant_final, na.rm = TRUE)
+```
+
+# Write combined matrix
+
+```{r}
+colnames(most_elegant_final)
+write_tsv(most_elegant_final, path = "output_data/six_datasets_combined.tsv")
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
