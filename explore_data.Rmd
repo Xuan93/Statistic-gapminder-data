@@ -1,0 +1,245 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+```{r}
+library(tidyverse)
+theme_set(theme_classic())
+library(GGally)
+library(shiny)
+library(plotly)
+library(ggforce)
+```
+
+```{r fig.height=10}
+rdf <- read_tsv("questions_and_data/five_datasets_combined.tsv") %>%
+    rename(
+        child_mort = child_mortality_17,
+        mean_school_wom = mean_schoolyears_in_women_09,
+        childs_per_wom = children_per_woman_17,
+        health_spend = health_spending_per_person_10,
+        income = income_per_person_17
+    )
+
+
+data_columns <- rdf %>% colnames() %>% tail(-1)
+
+ggpairs(rdf %>% select(data_columns))
+```
+
+```{r}
+selected_european <- c(
+    "Austria", "Belgium", "Denmark", "Finland", "France", "Germany", "Ireland",
+    "Italy", "Iceland", "Norway", "Netherlands", "Portugal", "Spain",
+    "Sweden", "United Kingdom"
+)
+
+newly_industrialized <- c(
+    "Brazil", "China", "India", "Indonesia", "Malaysia", "Mexico",
+    "Philippines", "South Africa", "Thailand", "Turkey"
+)
+
+rdf$group <- map(rdf$country, function(country) {
+    if (country %in% selected_european) "europe"
+    else if (country %in% newly_industrialized) "new_industry"
+    else "other"
+}) %>% unlist()
+
+rdf$country
+
+selected_european[!selected_european %in% rdf$country]
+newly_industrialized[!newly_industrialized %in% rdf$country]
+
+rdf_long <- rdf %>% pivot_longer(all_of(data_columns))
+head(rdf_long)
+
+rdf_long %>% ggplot(aes(x=value)) + facet_wrap(name~., scales = "free_x", ncol=3) + geom_histogram(bins=50)
+
+
+```
+
+
+```{r}
+ui <- fluidPage(
+    headerPanel("Exploring Gapminder with Shiny"),
+    wellPanel(
+        fluidRow(
+            column(4, selectInput("compare_dataset", "Compare dataset", choices = data_columns, selected = data_columns[1])),
+            column(4, checkboxInput("color_on_cat", "Color on categories", value = TRUE)),
+            column(4, selectInput("color", "Color", choices = data_columns, selected = data_columns[2]))
+        ),
+        fluidRow(
+            column(4, checkboxInput("only_show_targets", "Only show target groups", value=FALSE))
+        )
+    ),
+    fluidRow(
+        fluidRow(
+            column(6, plotlyOutput("scatter_out1"), style='padding-right:0px;'),
+            column(6, plotlyOutput("scatter_out2"), style='padding-right:0px;'),
+        ),
+        fluidRow(
+            column(6, plotlyOutput("scatter_out3"), style='padding-right:0px;'),
+            column(6, plotlyOutput("scatter_out4"), style='padding-right:0px;')
+        )
+    )
+)
+
+make_scatter <- function(rdf, d1_col, d2_col, color_col) {
+    
+    cor_val <- cor.test(rdf[[d1_col]], rdf[[d2_col]])
+    
+    if (color_col == "group") {
+        color_scale <- scale_color_brewer(palette="Set1")
+    }
+    else {
+        color_scale <- scale_color_gradient(low="steelblue", high="red")
+    }
+    
+    rdf %>% ggplot(aes_string(
+        x=d1_col, 
+        y=d2_col, 
+        label="country", 
+        color=color_col)) + 
+            geom_point() +
+            color_scale + 
+            geom_smooth(method="lm") + 
+        ggtitle(sprintf("Pearson corr: %s p-value: %s", round(cor_val$estimate, 3), round(cor_val$p.value, 3)))
+}
+
+
+server <- function(input, output) {
+    
+    datasets_wo_compare <- reactive({
+        data_columns %>% discard(~.==input$compare_dataset)
+    })
+    
+    selected_data <- reactive({
+        if (input$only_show_targets) {
+            rdf %>% filter(country %in% c(selected_european, newly_industrialized))
+        }
+        else {
+            rdf
+        }
+    })
+    
+    target_color <- reactive({
+        if (input$color_on_cat) {
+            "group"
+        }
+        else {
+            input$color
+        }
+    })
+    
+    output$scatter_out1 <- renderPlotly({
+        make_scatter(selected_data(), input$compare_dataset, datasets_wo_compare()[1], target_color())
+    })
+    output$scatter_out2 <- renderPlotly({
+        make_scatter(selected_data(), input$compare_dataset, datasets_wo_compare()[2], target_color())
+    })
+    output$scatter_out3 <- renderPlotly({
+        make_scatter(selected_data(), input$compare_dataset, datasets_wo_compare()[3], target_color())
+    })
+    output$scatter_out4 <- renderPlotly({
+        make_scatter(selected_data(), input$compare_dataset, datasets_wo_compare()[4], target_color())
+    })
+}
+
+shiny::shinyApp(ui, server)
+```
+
+```{r}
+
+
+rdf
+
+rdf %>% mutate_all(funs(replace_na(., 0))) %>% ggplot(aes(x=.panel_x, y=.panel_y, label=country)) + 
+    geom_point(aes(color=cm)) + 
+    geom_autohistogram(na.rm=TRUE) +
+    # geom_density2d() +
+    facet_matrix(vars(!matches("country")), layer.diag=2, layer.upper=3) + theme_bw() +
+    scale_color_gradient(low="steelblue", high="red")
+        
+?geom_autodensity
+```
+
+# Statistical check
+
+```{r fig.width=9}
+data_columns
+
+calculate_stat_boxplot <- function() {
+    
+}
+
+map(
+    data_columns, 
+    ~rdf %>% filter(group != "other") %>% ggplot(aes_string(x="group", y=.x)) + geom_boxplot() + geom_point()) %>%
+    ggpubr::ggarrange(plotlist=.)
+
+rdf_long
+
+library(ggsignif)
+library(rstatix)
+
+
+t.test(c(1,2,3), c(2,3,4))
+t.test(dist~speed, data=cars)
+
+rdf$group %>% table()
+
+stat_test_out <- rdf_long %>% 
+    filter(group != "other") %>%
+    group_by(name) %>%
+    t_test(value~group) %>%
+    adjust_pvalue() %>%
+    mutate(y.position = 10)
+
+
+
+library(ggpubr)
+
+comparisons <- list(
+    c("europe", "new_industry"),
+    c("europe", "other"),
+    c("other", "new_industry")
+)
+
+rdf %>% 
+    mutate_at(data_columns, scale) %>%
+    pivot_longer(data_columns) %>% 
+    ggplot(aes(x=group, y=value, color=group)) + 
+        geom_boxplot() + 
+        theme(axis.text.x=element_text(angle=90,vjust=0.5)) +
+        geom_signif(comparisons=comparisons, map_signif_level = TRUE, color="darkgray", step_increase = .1) + 
+        #stat_pvalue_manual(stat_test_out, label="p.adj") + 
+        facet_grid(.~name) + ylim(-2, 8)
+
+```
+
+
+```{r}
+rdf
+
+library(leaps)
+
+colnames(rdf)
+
+model <- child_mort ~ mean_school_wom + childs_per_wom + health_spend + income
+fit <- lm(model, data=rdf)
+leaps_out <- regsubsets(model, data=rdf)
+summary(leaps_out)
+plot(leaps_out, scale="adjr2")
+
+
+```
+
+
+
+
+
+
+
+
+
