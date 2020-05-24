@@ -1,0 +1,163 @@
+---
+title: "R Notebook"
+output:
+  pdf_document: default
+  html_notebook: default
+---
+
+# Load library
+
+```{r}
+library(tidyverse)
+library(ggplot2)
+library(ggpubr)
+library(corrplot)
+library(RColorBrewer)
+```
+
+# Load data
+```{r}
+raw_data <- read_tsv("five_datasets_combined.tsv")
+head(raw_data)
+
+european_countries_names <-c("Austria", "Belgium", "Denmark", "Finland", "France", "Germany", "Ireland", "Italy", "Iceland", "Norway", "Netherlands", "Portugal", "Spain", "Sweden", "United Kingdom")
+european_countries<- raw_data %>% filter(country %in% european_countries_names) %>% mutate(place="European")
+european_countries
+
+
+industrialized_countries_names <- c("Brazil", "China", "India", "Indonesia", "Malaysia", "Mexico", "Philippines", "South Africa", "Thailand", "Turkey")
+industrialized_countries <- raw_data %>% filter(country %in% industrialized_countries_names) %>% mutate(place="Industrialized")
+industrialized_countries
+
+total <- rbind(european_countries, industrialized_countries)
+total
+```
+
+# Visualize data
+
+```{r fig.width=10}
+p1 <- total %>%
+ggplot(aes(x=country, y=child_mortality_17)) + geom_point() + theme(axis.text.x = element_text(angle = 60, hjust = 1)) + ggtitle("Childen mortality") +
+  facet_wrap(~place, scales="free_x")
+
+p2 <- total %>%
+ggplot(aes(x=country, y=mean_schoolyears_in_women_09)) + geom_point() + theme(axis.text.x = element_text(angle = 60, hjust = 1))  + ggtitle("School years") +
+  facet_wrap(~place, scales="free_x")
+
+p3 <- total %>%
+ggplot(aes(x=country, y=children_per_woman_17)) + geom_point() + theme(axis.text.x = element_text(angle = 60, hjust = 1))  + ggtitle("Number of children") +
+  facet_wrap(~place, scales="free_x")
+
+p4 <- total %>%
+ggplot(aes(x=country, y=health_spending_per_person_10)) + geom_point() + theme(axis.text.x = element_text(angle = 60, hjust = 1))  + ggtitle("Health spending") +
+  facet_wrap(~place, scales="free_x")
+
+p5 <- total %>%
+ggplot(aes(x=country, y=income_per_person_17)) + geom_point() + theme(axis.text.x = element_text(angle = 60, hjust = 1))  + ggtitle("Income") +
+  facet_wrap(~place, scales="free_x")
+
+figure1 <- ggarrange(p1, p2, p3, p4, p5,ncol=2, nrow=2)
+figure1
+```
+
+# Basic analysis
+```{r fig.width=10}
+total %>% group_by(place) %>% summarise_all(funs(mean(., na.rm = TRUE), sd(., na.rm = TRUE)))
+
+# Normality test
+ggqqplot(european_countries$child_mortality_17)
+shapiro.test(european_countries$child_mortality_17)
+shapiro.test(european_countries$mean_schoolyears_in_women_09)
+shapiro.test(european_countries$children_per_woman_17)
+shapiro.test(european_countries$health_spending_per_person_10)
+shapiro.test(european_countries$income_per_person_17)
+
+ggqqplot(industrialized_countries$child_mortality_17)
+shapiro.test(industrialized_countries$child_mortality_17)
+shapiro.test(industrialized_countries$mean_schoolyears_in_women_09)
+shapiro.test(industrialized_countries$children_per_woman_17)
+shapiro.test(industrialized_countries$health_spending_per_person_10)
+shapiro.test(industrialized_countries$income_per_person_17)
+
+# Variances homogeneity test
+var.test(child_mortality_17 ~ place, data=total)
+var.test(mean_schoolyears_in_women_09 ~ place, data=total)
+var.test(children_per_woman_17 ~ place, data=total)
+var.test(health_spending_per_person_10 ~ place, data=total)
+var.test(income_per_person_17 ~ place, data=total)
+
+# For child_mortality_17 and health_spending_per_person_10, t-test is not useable, use Mann–Whitney U test instead.
+wilcox.test(child_mortality_17 ~ place, data=total, alternative = "less")
+t.test(mean_schoolyears_in_women_09 ~ place, data=total, var.equal = TRUE, alternative = "greater")
+t.test(children_per_woman_17 ~ place, data=total, var.equal = TRUE, alternative = "two.sided")
+wilcox.test(health_spending_per_person_10 ~ place, data=total, alternative = "greater")
+t.test(income_per_person_17~ place, data=total, var.equal = TRUE, alternative = "greater")
+
+a1 <- total %>% ggplot(aes(x=place, y=child_mortality_17, color=place)) + geom_point() + geom_boxplot() + ggtitle("Childen mortality") + stat_compare_means(method = "wilcox.test")
+
+a2 <- total %>% ggplot(aes(x=place, y=mean_schoolyears_in_women_09, color=place)) + geom_point() + geom_boxplot() + ggtitle("School years") + stat_compare_means(method = "t.test")
+
+a3 <- total %>% ggplot(aes(x=place, y=children_per_woman_17, color=place)) + geom_point() + geom_boxplot() + ggtitle("Number of childrenity") + stat_compare_means(method = "t.test")
+
+a4 <- total %>% ggplot(aes(x=place, y=health_spending_per_person_10, color=place)) + geom_point() + geom_boxplot() + ggtitle("Health spending") + stat_compare_means(method = "wilcox.test")
+
+a5 <- total %>% ggplot(aes(x=place, y=income_per_person_17, color=place)) + geom_point() + geom_boxplot() + ggtitle("Income") + stat_compare_means(method = "t.test")
+
+figure2 <- ggarrange(a1, a2, a3, a4, a5,ncol=2, nrow=2)
+figure2
+```
+
+# Correlation analysis
+```{r}
+e1 <- european_countries %>% ggscatter(x= "mean_schoolyears_in_women_09", y= "child_mortality_17", add = "reg.line", conf.int = TRUE, 
+          cor.coef = TRUE, cor.method = "pearson",
+          xlab = "School year", ylab = "Children mortality")
+
+e2 <- european_countries %>% ggscatter(x= "children_per_woman_17", y= "child_mortality_17", add = "reg.line", conf.int = TRUE, 
+          cor.coef = TRUE, cor.method = "pearson",
+          xlab = "Number of children", ylab = "Children mortality")
+
+e3 <- european_countries %>% ggscatter(x= "health_spending_per_person_10", y= "child_mortality_17", add = "reg.line", conf.int = TRUE, 
+          cor.coef = TRUE, cor.method = "pearson",
+          xlab = "Health spending", ylab = "Children mortality")
+  
+e4 <- european_countries %>% ggscatter(x= "income_per_person_17", y= "child_mortality_17", add = "reg.line", conf.int = TRUE, 
+          cor.coef = TRUE, cor.method = "pearson",
+          xlab = "Income", ylab = "Children mortality")
+
+figure3 <- ggarrange(e1, e2, e3, e4, ncol=2, nrow=2)
+figure3
+
+i1 <- industrialized_countries %>% ggscatter(x= "mean_schoolyears_in_women_09", y= "child_mortality_17", add = "reg.line", conf.int = TRUE, 
+          cor.coef = TRUE, cor.method = "pearson",
+          xlab = "School year", ylab = "Children mortality")
+
+i2 <- industrialized_countries %>% ggscatter(x= "children_per_woman_17", y= "child_mortality_17", add = "reg.line", conf.int = TRUE, 
+          cor.coef = TRUE, cor.method = "pearson",
+          xlab = "Number of children", ylab = "Children mortality")
+
+i3 <- industrialized_countries %>% ggscatter(x= "health_spending_per_person_10", y= "child_mortality_17", add = "reg.line", conf.int = TRUE, 
+          cor.coef = TRUE, cor.method = "pearson",
+          xlab = "Health spending", ylab = "Children mortality")
+  
+i4 <- industrialized_countries %>% ggscatter(x= "income_per_person_17", y= "child_mortality_17", add = "reg.line", conf.int = TRUE, 
+          cor.coef = TRUE, cor.method = "pearson",
+          xlab = "Income", ylab = "Children mortality")
+
+figure4 <- ggarrange(i1, i2, i3, i4, ncol=2, nrow=2)
+figure4
+```
+
+# Matrix figure
+```{r}
+european_countries_less <- european_countries %>% select(-c(country, place))
+european_matrix <- cor(european_countries_less)
+corrplot(european_matrix, type="upper", order="hclust",
+         col=brewer.pal(n=8, name="RdYlBu"))
+
+industrialized_countries_less <- industrialized_countries %>% filter (country != "Mexico") %>% select(-c(country, place))
+industrialized_matrix <- cor(industrialized_countries_less)
+corrplot(industrialized_matrix, type="upper", order="hclust",
+         col=brewer.pal(n=8, name="RdYlBu"))
+```
+
