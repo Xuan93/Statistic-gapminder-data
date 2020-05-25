@@ -1,19 +1,30 @@
 ---
 title: "R Notebook"
-output: html_notebook
+output:
+  html_document:
+    df_print: paged
 ---
 
+# Load libraries
+
 ```{r}
-library(tidyverse)
+quiet <- suppressPackageStartupMessages
+
+quiet(library(tidyverse))
 theme_set(theme_classic())
-library(GGally)
-library(shiny)
-library(plotly)
-library(ggforce)
+quiet(library(GGally))
+quiet(library(shiny))
+quiet(library(plotly))
+quiet(library(ggforce))
+quiet(library(ggsignif))
+quiet(library(rstatix))
+quiet(library(ggpubr))
 ```
 
+# Setup the data, and write cached data
+
 ```{r fig.height=10}
-rdf <- read_tsv("questions_and_data/five_datasets_combined.tsv") %>%
+rdf <- read_tsv("../questions_and_data/five_datasets_combined.tsv") %>%
     rename(
         child_mort = child_mortality_17,
         mean_school_wom = mean_schoolyears_in_women_09,
@@ -24,8 +35,7 @@ rdf <- read_tsv("questions_and_data/five_datasets_combined.tsv") %>%
 
 
 data_columns <- rdf %>% colnames() %>% tail(-1)
-
-ggpairs(rdf %>% select(data_columns))
+write_tsv(rdf, path = "preparsed_rdf.tsv.gz")
 ```
 
 ```{r}
@@ -46,21 +56,20 @@ rdf$group <- map(rdf$country, function(country) {
     else "other"
 }) %>% unlist()
 
-rdf$country
-
-selected_european[!selected_european %in% rdf$country]
-newly_industrialized[!newly_industrialized %in% rdf$country]
-
 rdf_long <- rdf %>% pivot_longer(all_of(data_columns))
-head(rdf_long)
-
-rdf_long %>% ggplot(aes(x=value)) + facet_wrap(name~., scales = "free_x", ncol=3) + geom_histogram(bins=50)
-
-
 ```
 
+# First quick checks
 
-```{r}
+```{r fig.width=10,fig.height=10}
+head(rdf_long)
+ggpairs(rdf %>% select(data_columns))
+rdf_long %>% ggplot(aes(x=value)) + facet_wrap(name~., scales = "free_x", ncol=3) + geom_histogram(bins=50)
+```
+
+# Shiny application draft (not run, found in separate file now, app.R)
+
+```{r eval=FALSE}
 ui <- fluidPage(
     headerPanel("Exploring Gapminder with Shiny"),
     wellPanel(
@@ -149,56 +158,15 @@ server <- function(input, output) {
 shiny::shinyApp(ui, server)
 ```
 
-```{r}
-
-
-rdf
-
-rdf %>% mutate_all(funs(replace_na(., 0))) %>% ggplot(aes(x=.panel_x, y=.panel_y, label=country)) + 
-    geom_point(aes(color=cm)) + 
-    geom_autohistogram(na.rm=TRUE) +
-    # geom_density2d() +
-    facet_matrix(vars(!matches("country")), layer.diag=2, layer.upper=3) + theme_bw() +
-    scale_color_gradient(low="steelblue", high="red")
-        
-?geom_autodensity
-```
-
-# Statistical check
+# Are there significant differences between the groups?
 
 ```{r fig.width=9}
-data_columns
-
-calculate_stat_boxplot <- function() {
-    
-}
-
-map(
-    data_columns, 
-    ~rdf %>% filter(group != "other") %>% ggplot(aes_string(x="group", y=.x)) + geom_boxplot() + geom_point()) %>%
-    ggpubr::ggarrange(plotlist=.)
-
-rdf_long
-
-library(ggsignif)
-library(rstatix)
-
-
-t.test(c(1,2,3), c(2,3,4))
-t.test(dist~speed, data=cars)
-
-rdf$group %>% table()
-
 stat_test_out <- rdf_long %>% 
     filter(group != "other") %>%
     group_by(name) %>%
     t_test(value~group) %>%
     adjust_pvalue() %>%
     mutate(y.position = 10)
-
-
-
-library(ggpubr)
 
 comparisons <- list(
     c("europe", "new_industry"),
@@ -213,33 +181,62 @@ rdf %>%
         geom_boxplot() + 
         theme(axis.text.x=element_text(angle=90,vjust=0.5)) +
         geom_signif(comparisons=comparisons, map_signif_level = TRUE, color="darkgray", step_increase = .1) + 
-        #stat_pvalue_manual(stat_test_out, label="p.adj") + 
         facet_grid(.~name) + ylim(-2, 8)
 
 ```
 
+# Are there significant correlations?
+
+```{r fig.width=12,fig.height=20}
+combn(data_columns, 2) %>% data.frame()
+
+europe_df <- rdf %>% filter(group=="europe")
+new_ind_df <- rdf %>% filter(group=="new_industry")
+
+make_corr_plot <- function(europe_df, new_ind_df, first_col, second_col, round_digs=2) {
+    
+    eu_cor <- cor.test(
+        europe_df %>% pull(first_col),
+        europe_df %>% pull(second_col)
+    )
+    
+    new_ind_cor <- cor.test(
+        new_ind_df %>% pull(first_col),
+        new_ind_df %>% pull(second_col)
+    )
+    
+    ggplot(
+        rbind(europe_df, new_ind_df), 
+        aes_string(x=first_col, y=second_col, color="group")) + 
+            geom_point() + 
+            geom_smooth(method="lm", formula = y~x) +
+            scale_color_brewer(palette="Set1") +
+            ggtitle(sprintf("cor %s (p %s) Europe\ncor %s (p %s) New ind.", 
+                            round(eu_cor$estimate, round_digs), 
+                            round(eu_cor$p.value, round_digs), 
+                            round(new_ind_cor$estimate, round_digs), 
+                            round(new_ind_cor$p.value, round_digs)))
+}
+
+plot_list <- combn(data_columns, 2) %>% 
+    apply(2, function(col_vals) {
+        make_corr_plot(europe_df, new_ind_df, col_vals[1], col_vals[2])
+    })
+
+ggarrange(plotlist=plot_list, ncol=3, nrow=8, common.legend = TRUE)
+```
+
+
+# Trying out building optimal linear model predicting child mortality
 
 ```{r}
-rdf
-
 library(leaps)
-
-colnames(rdf)
 
 model <- child_mort ~ mean_school_wom + childs_per_wom + health_spend + income
 fit <- lm(model, data=rdf)
 leaps_out <- regsubsets(model, data=rdf)
 summary(leaps_out)
 plot(leaps_out, scale="adjr2")
-
-
 ```
-
-
-
-
-
-
-
 
 
